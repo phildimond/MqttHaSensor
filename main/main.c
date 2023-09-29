@@ -13,11 +13,19 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "utilities.h"
 
 static const char *TAG = "example";
 
 void app_main(void)
 {
+    char input[80];
+    printf("Enter a string: ");
+    int length = getLineInput(input, 80);
+    printf ("\r\nYou entered the %d character string %s: ", length, input);
+    for (int i = 0; i < length; i++) { printf("[%d]",input[i]); } printf("\r\n");
+
+    
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
     esp_vfs_spiffs_conf_t conf = {

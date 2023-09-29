@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "MqttHaSensor",
-    "project_version":    "1",
+    "project_version":    "277871f-dirty",
     "project_path":       "/home/phillip/source/repos/MqttHaSensor",
     "idf_path":           "/home/phillip/esp/esp-idf",
     "build_dir":          "/home/phillip/source/repos/MqttHaSensor/build",
@@ -805,7 +805,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "/home/phillip/source/repos/MqttHaSensor/build/esp-idf/main/libmain.a",
-            "sources": [ "/home/phillip/source/repos/MqttHaSensor/main/main.c" ],
+            "sources": [ "/home/phillip/source/repos/MqttHaSensor/main/main.c", "/home/phillip/source/repos/MqttHaSensor/main/utilities.c" ],
             "include_dirs": [ "." ]
         },
         "mbedtls": {
