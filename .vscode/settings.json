@@ -5,6 +5,7 @@
   "idf.adapterTargetName": "esp32",
   "files.associations": {
     "string_view": "cpp",
-    "regex": "cpp"
+    "regex": "cpp",
+    "typeinfo": "c"
   }
 }
