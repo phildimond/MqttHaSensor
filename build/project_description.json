@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "MqttHaSensor",
-    "project_version":    "d52c81e-dirty",
+    "project_version":    "d9935c2-dirty",
     "project_path":       "/home/phillip/source/repos/MqttHaSensor",
     "idf_path":           "/home/phillip/esp/esp-idf",
     "build_dir":          "/home/phillip/source/repos/MqttHaSensor/build",
