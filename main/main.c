@@ -1,9 +1,28 @@
-/* SPIFFS filesystem example.
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
+/* MQTT Sensor Sender for Home Assistant
+   
+   Reads a temperature & humidity probe (SHT20, SDA on IO21 and SCL on IO22)
+   and sends the data to Home Assistant (or anything else) via MQTT. Hold a 
+   button low on IO27 at boot to set the configuration variables. Also sends
+   the current battery voltage read from IO34 via a divider network of 
+   2 x 1M resistors. Config allows you to calibrate the battery voltage by
+   measuring it and entering the real value. Uses a DF Robot Firebeetle 
+   ESP32-E board which has the button and battery divider on board, but
+   will operate with any ESP32 if properly compiled.
 
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
+   Copyright 2023 Phillip C Dimond
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
 */
 
 #include <stdio.h>
@@ -14,6 +33,7 @@
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_sleep.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "utilities.h"
@@ -21,12 +41,21 @@
 
 #define DEBUG 1
 #define SLEEPTIME 15
+#define BUTTON_PIN  GPIO_NUM_27
 #define S_TO_uS(s) (s * 1000000)
 
 // static const char *TAG = "example";
 
 void app_main(void)
 {
+    // GPIO setup
+    gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_PIN, GPIO_PULLUP_ONLY);
+
+    if (gpio_get_level(BUTTON_PIN) == 0) {
+        printf("Button was pushed.\r\n");
+    }
+
     // Initialise the SPIFFS system
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
