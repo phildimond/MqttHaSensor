@@ -19,8 +19,8 @@
 
 */
 
-#ifndef __CONFIG_H
-#define __CONFIG_H
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
 
 #define filename "/spiffs/config.txt"
 #define VinPerBitDefault (3.30/2.0)/4095.0   // ADC FS split in two / resolution
@@ -46,4 +46,4 @@ bool LoadConfiguration();
 bool SaveConfiguration();
 void UserConfigEntry();
 
-#endif // #ifndef __CONFIG_H
+#endif // #ifndef __CONFIG_H__

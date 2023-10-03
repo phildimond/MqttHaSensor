@@ -27,24 +27,28 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_spiffs.h"
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "utilities.h"
 #include "config.h"
+#include "sht20.h"
 
 #define DEBUG 1
-#define SLEEPTIME 15
-#define BUTTON_PIN  GPIO_NUM_27
+#define SLEEPTIME 30
+#define BUTTON_PIN  27
+#define SHT20_SCL   22
+#define SHT20_SDA   21
 #define S_TO_uS(s) (s * 1000000)
-
-// static const char *TAG = "example";
 
 void app_main(void)
 {
@@ -57,15 +61,15 @@ void app_main(void)
     }
 
     // Initialise the SPIFFS system
-    esp_vfs_spiffs_conf_t conf = {
+    esp_vfs_spiffs_conf_t spiffs_conf = {
         .base_path = "/spiffs",
         .partition_label = NULL,
         .max_files = 5,
         .format_if_mount_failed = true};
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-    if (ret != ESP_OK)
+    esp_err_t err = esp_vfs_spiffs_register(&spiffs_conf);
+    if (err != ESP_OK)
     {
-        printf("SPIFFS Mount Failed: %s\r\n", esp_err_to_name(ret));
+        printf("SPIFFS Mount Failed: %s\r\n", esp_err_to_name(err));
         printf("Reformatting the SPIFFs partition, please restart.");
         return;
     }
@@ -98,9 +102,33 @@ void app_main(void)
         printf("               WiFi SSID: %s, WiFi Password: %s\r\n", config.ssid, config.pass);
         printf("               MQTT URL: %s, Username: %s, Password: %s\r\n", config.mqttBrokerUrl, config.mqttUsername, config.mqttPassword);
     }
+    
+    // Initialise the SHT20 driver
+    err = SHT20_Initialise(SHT20_SCL, SHT20_SDA);
+    if (err != ESP_OK) {
+        printf ("Error initialising the SHT20 driver: %s.\r\n", esp_err_to_name(err));
+    }
+
+    // Read the current temperature from the SHT20
+    float temperature = 0.0;
+    err = SHT20_ReadTemp(&temperature);
+    if (err != ESP_OK) {
+        printf ("Error reading the temperature from the SHT20: %s.\r\n", esp_err_to_name(err));
+    } else {
+        printf ("The current temperature is %f.\r\n", temperature);
+    }
+
+    // Remove the SHT20 driver
+    err = SHT20_Remove();
+    if (err != ESP_OK) {
+        printf ("Error removing the SHT20 driver: %s.\r\n", esp_err_to_name(err));
+    }
 
     // All done, unmount partition and disable SPIFFS
-    esp_vfs_spiffs_unregister(conf.partition_label);
+    err = esp_vfs_spiffs_unregister(spiffs_conf.partition_label);
+    if ( err != ESP_OK) {
+        printf("SPIFFS deregistration: Error %d = %s.\r\n", err, esp_err_to_name(err));
+    }
     printf("SPIFFS unmounted.\r\n");
 
     // Go to sleep

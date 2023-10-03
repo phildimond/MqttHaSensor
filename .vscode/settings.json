@@ -6,6 +6,11 @@
   "files.associations": {
     "string_view": "cpp",
     "regex": "cpp",
-    "typeinfo": "c"
-  }
+    "typeinfo": "c",
+    "i2c_master.h": "c"
+  },
+  "idf.openOcdConfigs": [
+    "interface/ftdi/esp32_devkitj_v1.cfg",
+    "target/esp32.cfg"
+  ]
 }
