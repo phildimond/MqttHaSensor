@@ -42,7 +42,7 @@ void SetDefaultConfig()
     strcpy(config.mqttBrokerUrl, "Not Set!");
     strcpy(config.mqttUsername, "Not Set!");
     strcpy(config.mqttPassword, "Not Set!");
-    config.vinPerBit = VinPerBitDefault;
+    config.battVCalFactor = 1.0;
 }
 
 // Loads the configuration from a file
@@ -101,10 +101,10 @@ bool LoadConfiguration()
         strcpy(config.UID, item->valuestring);
     } else { strcat(errorString, "UID "); } // record which value failed
 
-    item = cJSON_GetObjectItemCaseSensitive(settingsJSON, "vinPerBit");
+    item = cJSON_GetObjectItemCaseSensitive(settingsJSON, "battVCalFactor");
     if (cJSON_IsNumber(item)) {
-        config.vinPerBit = (float)(item->valuedouble);
-    } else { strcat(errorString, "vinPerBit "); } // record which value failed
+        config.battVCalFactor = (float)(item->valuedouble);
+    } else { strcat(errorString, "battVCalFactor "); } // record which value failed
 
     item = cJSON_GetObjectItemCaseSensitive(settingsJSON, "ssid");
     if (cJSON_IsString(item) && (item->valuestring != NULL)) {
@@ -146,13 +146,6 @@ bool LoadConfiguration()
 // Saves the configuration to a file
 bool SaveConfiguration()
 {
-
-    printf("\r\n");
-    printf("Saving config:       Name=%s, Device ID=%s, UID=%s\r\n", config.Name, config.DeviceID, config.UID);
-    printf("                     WiFi SSID=%s, WiFi Password=%s\r\n", config.ssid, config.pass);
-    printf("                     MQTT URL=%s, Username=%s, Password=%s\r\n", config.mqttBrokerUrl, config.mqttUsername, config.mqttPassword);
-
-    
     // Allocate a temporary JsonDocument
     cJSON *root = cJSON_CreateObject();
 
@@ -161,7 +154,7 @@ bool SaveConfiguration()
     cJSON_AddItemToObject(root, "Name", cJSON_CreateString(config.Name));
     cJSON_AddItemToObject(root, "DeviceID", cJSON_CreateString(config.DeviceID));
     cJSON_AddItemToObject(root, "UID", cJSON_CreateString(config.UID));
-    cJSON_AddItemToObject(root, "vinPerBit", cJSON_CreateNumber(config.vinPerBit));
+    cJSON_AddItemToObject(root, "battVCalFactor", cJSON_CreateNumber(config.battVCalFactor));
     cJSON_AddItemToObject(root, "ssid", cJSON_CreateString(config.ssid));
     cJSON_AddItemToObject(root, "pass", cJSON_CreateString(config.pass));
     cJSON_AddItemToObject(root, "mqttBrokerUrl", cJSON_CreateString(config.mqttBrokerUrl));
