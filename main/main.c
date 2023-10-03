@@ -111,11 +111,12 @@ void app_main(void)
 
     // Read the current temperature from the SHT20
     float temperature = 0.0;
-    err = SHT20_ReadTemp(&temperature);
+    float humidity = 0.0;
+    err = SHT20_TakeReadings(&temperature, &humidity);
     if (err != ESP_OK) {
-        printf ("Error reading the temperature from the SHT20: %s.\r\n", esp_err_to_name(err));
+        printf ("Error reading from the SHT20: %s.\r\n", esp_err_to_name(err));
     } else {
-        printf ("The current temperature is %f.\r\n", temperature);
+        printf ("The current temperature is %f C and the current humidity is %f %%RH.\r\n", temperature, humidity);
     }
 
     // Remove the SHT20 driver

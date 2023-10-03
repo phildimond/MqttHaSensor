@@ -26,7 +26,7 @@
 #include "driver/gpio.h"
 
 esp_err_t SHT20_Initialise(gpio_num_t sclPin, gpio_num_t sdaPin);
-esp_err_t SHT20_ReadTemp(float* tempVal);
+esp_err_t SHT20_TakeReadings(float* temperature, float* humidity);
 esp_err_t SHT20_Remove(void);
 
 #endif // __SHT20_H__

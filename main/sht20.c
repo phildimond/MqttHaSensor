@@ -66,13 +66,13 @@ esp_err_t SHT20_Initialise(gpio_num_t sclPin, gpio_num_t sdaPin)
     return ESP_OK;
 }
 
-esp_err_t SHT20_ReadTemp(float* tempVal)
+esp_err_t SHT20_TakeReadings(float* temperature, float* humidity)
 {
     uint8_t command[1];
     uint8_t rx_data[3];  
     memset(rx_data, 0x00, sizeof(rx_data));
 
-    command[0] = 0xF3;    // Read Temp, no hold
+    command[0] = 0xF3;    // Read Temperature, no hold
 
     esp_err_t err = i2c_master_write_to_device(i2c_master_port, 0x40, command, 1, 10/portTICK_PERIOD_MS);
     if ( err != ESP_OK) {
@@ -91,10 +91,31 @@ esp_err_t SHT20_ReadTemp(float* tempVal)
         ESP_LOGW(TAG, "I2C error reading data: Error %d = %s.\r\n", err, esp_err_to_name(err));
         return err;
     } else {
-//        printf("Read sensor OK: value from buffer ");
-//        ESP_LOG_BUFFER_HEX("i2c Rx Buffer", rx_data, 5);
         uint32_t tval = (rx_data[0] << 8) + (rx_data[1] & 0xFC);
-        *tempVal = -46.85 + 175.72 * ((float)(tval) / pow(2 , 16));
+        *temperature = -46.85 + 175.72 * ((float)(tval) / (float)pow(2 , 16));
+    }
+
+    command[0] = 0xF5;    // Read Humidity, no hold
+
+    err = i2c_master_write_to_device(i2c_master_port, 0x40, command, 1, 10/portTICK_PERIOD_MS);
+    if ( err != ESP_OK) {
+        ESP_LOGW(TAG, "I2C error sending command: Error %d = %s.\r\n", err, esp_err_to_name(err));
+        return err;
+    }
+
+    vTaskDelay(200 / portTICK_PERIOD_MS); // Sleep 200ms to allow the device to process the read
+
+    loops = 0;
+    while (true) {
+        err = i2c_master_read_from_device(i2c_master_port, 0x40, rx_data, 3, 10/portTICK_PERIOD_MS);
+        if (++loops > 5 || err == ESP_OK) { break; }
+    }
+    if ( err != ESP_OK) {
+        ESP_LOGW(TAG, "I2C error reading data: Error %d = %s.\r\n", err, esp_err_to_name(err));
+        return err;
+    } else {
+        uint32_t hval = (rx_data[0] << 8) + (rx_data[1] & 0xFC);
+        *humidity = -6.0 + 125.0 * ((float)(hval) / (float)pow(2 , 16));
     }
 
     return ESP_OK;
