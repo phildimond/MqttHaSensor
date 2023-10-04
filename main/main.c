@@ -25,38 +25,167 @@
 
 */
 
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <sys/unistd.h>
-#include <sys/stat.h>
-#include "esp_err.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_spiffs.h"
-#include "esp_sleep.h"
-#include "driver/gpio.h"
-#include "esp_log.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/timers.h"
-#include "utilities.h"
-#include "config.h"
-#include "sht20.h"
+#include "main.h"
 
-#define DEBUG 1
-#define SLEEPTIME 30
-#define BUTTON_PIN  27
-#define SHT20_SCL   22
-#define SHT20_SDA   21
-#define S_TO_uS(s) (s * 1000000)
+esp_err_t err;
+int retry_num = 0;
+bool WiFiGotIP = false;
+char s[80]; // general purpose string input
+
+static const char *TAG = "MqttHaSensor";
+
+static void log_error_if_nonzero(const char *message, int error_code)
+{
+    if (error_code != 0) {
+        ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
+    }
+}
+
+static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    if (event_id == WIFI_EVENT_STA_START)
+    {
+        printf("WIFI CONNECTING....\n");
+    }
+    else if (event_id == WIFI_EVENT_STA_CONNECTED)
+    {
+        printf("WiFi CONNECTED\n");
+    }
+    else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+        printf("WiFi lost connection\n");
+        if (retry_num < 5)
+        {
+            esp_wifi_connect();
+            retry_num++;
+            printf("Retrying to Connect...\n");
+        }
+    }
+    else if (event_id == IP_EVENT_STA_GOT_IP)
+    {
+        WiFiGotIP = true;
+        printf("Wifi got IP...\n\n");
+    }
+}
+
+void wifi_connection()
+{
+    err = nvs_flash_init();
+    if (err != ESP_OK) { printf("Error at nvs_flash_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    err = esp_netif_init();                                                                    // network interdace initialization
+    if (err != ESP_OK) { printf("Error at esp_netif_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    err = esp_event_loop_create_default();                                                     // responsible for handling and dispatching events
+    if (err != ESP_OK) { printf("Error at esp_event_loop_create_default: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    esp_netif_create_default_wifi_sta();                                                 // sets up necessary data structs for wifi station interface
+    wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();                     // sets up wifi wifi_init_config struct with default values
+    err = esp_wifi_init(&wifi_initiation);                                                     // wifi initialised with dafault wifi_initiation
+    if (err != ESP_OK) { printf("Error at esp_wifi_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);  // creating event handler register for wifi
+    if (err != ESP_OK) { printf("Error at esp_event_handler_register(WIFI_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL); // creating event handler register for ip event
+    if (err != ESP_OK) { printf("Error at esp_event_handler_register(IP_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    wifi_config_t wifi_configuration = {                                                 // struct wifi_config_t var wifi_configuration
+        .sta = {
+            // we are sending a const char of ssid and password which we will strcpy in following line so leaving it blank
+            .ssid = "",
+            .password = ""
+        }
+    };
+    strcpy((char*)wifi_configuration.sta.ssid, config.ssid);    
+    strcpy((char*)wifi_configuration.sta.password, config.pass);   
+    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);  // setting up configs when event ESP_IF_WIFI_STA
+    esp_wifi_start();       // start connection with configurations provided in funtion
+    esp_wifi_set_mode(WIFI_MODE_STA);   // station mode selected
+    esp_wifi_connect(); // connect with saved ssid and pass
+    printf( "wifi_init_softap finished. SSID:%s  password:%s", config.ssid, config.pass);
+} 
+
+/*
+ * @brief Event handler registered to receive MQTT events
+ *
+ *  This function is called by the MQTT client event loop.
+ *
+ * @param handler_args user data registered to the event.
+ * @param base Event base for the handler(always MQTT Base in this example).
+ * @param event_id The id for the received event.
+ * @param event_data The data for the event, esp_mqtt_event_handle_t.
+ */
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    char topic[80];
+    char payload[250];
+    esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_client_handle_t client = event->client;
+    int msg_id;
+
+    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
+
+    switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_CONNECTED:
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        sprintf(topic, "homeassistant/sensor/%s", config.Name);
+        sprintf(payload, "{ i: 1 }");
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 0);
+        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        break;
+    case MQTT_EVENT_DISCONNECTED:
+        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        break;
+    case MQTT_EVENT_SUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_UNSUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_DATA:
+        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+            log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
+            log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
+            log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
+            ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+
+        }
+        break;
+    default:
+        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        break;
+    }
+}
+
+static void mqtt_app_start(void)
+{
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .network = {
+        },
+        .broker.address.uri = config.mqttBrokerUrl,
+        .credentials = { 
+            .username = config.mqttUsername, 
+            .authentication = { 
+                .password = config.mqttPassword
+            }, 
+        },
+        .session = {
+            .protocol_ver = MQTT_PROTOCOL_V_3_1_1
+        },
+    };
+    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    esp_mqtt_client_start(client);
+}
 
 void app_main(void)
 {
-    esp_err_t err;
     bool doBatteryCal = false;
-    char s[80]; // general purpose string input
 
     // GPIO setup
     gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
@@ -111,6 +240,17 @@ void app_main(void)
         printf("               MQTT URL: %s, Username: %s, Password: %s\r\n", config.mqttBrokerUrl, config.mqttUsername, config.mqttPassword);
     }
     
+    // Start WiFi, wait for WiFi to connect and get IP
+    wifi_connection();
+    int loops = 0;
+    while (loops < 10000 && !WiFiGotIP) {
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Wait 10 millseconds
+    }
+
+    // Start mqtt
+    mqtt_app_start();
+
+
     // Initialise the SHT20 driver
     err = SHT20_Initialise(SHT20_SCL, SHT20_SDA);
     if (err != ESP_OK) {
@@ -174,6 +314,9 @@ void app_main(void)
         printf("SPIFFS deregistration: Error %d = %s.\r\n", err, esp_err_to_name(err));
     }
     printf("SPIFFS unmounted.\r\n");
+
+    printf("Sleep for 10 seconds to process WiFi connections.\r\n");
+    vTaskDelay(10000 / portTICK_PERIOD_MS); 
 
     // Go to sleep
     if (DEBUG) { printf("Time to sleep for %d seconds.\r\n", SLEEPTIME); }

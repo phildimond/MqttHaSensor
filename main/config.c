@@ -25,6 +25,12 @@
 #include "esp_err.h"
 #include "esp_spiffs.h"
 #include <cJSON.h>
+
+#include "lwip/sockets.h"
+#include "lwip/dns.h"
+#include "lwip/netdb.h"
+#include "mqtt_client.h"
+
 #include "config.h"
 #include "utilities.h"
 
