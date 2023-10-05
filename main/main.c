@@ -29,8 +29,14 @@
 
 esp_err_t err;
 int retry_num = 0;
-bool WiFiGotIP = false;
 char s[80]; // general purpose string input
+float temperature = 0.0;
+float humidity = 0.0;
+float battVolts = 0.0;
+bool WiFiGotIP = false;
+bool sentMeasurements = false;
+int mqttMessagesQueued = 0;
+uint64_t timeToDeepSleep = (S_TO_uS(SLEEPTIME));
 
 static const char *TAG = "MqttHaSensor";
 
@@ -113,7 +119,7 @@ void wifi_connection()
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     char topic[80];
-    char payload[250];
+    char payload[1024];
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
@@ -123,10 +129,40 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        sprintf(topic, "homeassistant/sensor/%s", config.Name);
-        sprintf(payload, "{ i: 1 }");
-        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+        sprintf(topic, "homeassistant/sensor/%sTemperature/config",config.Name);
+        sprintf(payload, "{\"device_class\": \"temperature\", \"state_topic\": \"homeassistant/sensor/%s/state\", \
+            \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\",\"unique_id\": \"T_%s\", \
+            \"device\": {\"identifiers\": [\"%s\"], \"name\": \"%s\" }}", config.Name, config.UID, config.DeviceID, config.Name );
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 1); // Temp sensor config, set the retain flag on the message
+        mqttMessagesQueued++;
+        ESP_LOGI(TAG, "Published temperature config message successfully, msg_id=%d", msg_id);
+
+        sprintf(topic, "homeassistant/sensor/%sHumidity/config", config.Name);
+        sprintf(payload, "{\"device_class\": \"humidity\", \"state_topic\": \"homeassistant/sensor/%s/state\", \
+            \"unit_of_measurement\": \"%%\", \"value_template\": \"{{ value_json.humidity}}\",\"unique_id\": \"H_%s\", \
+            \"device\": {\"identifiers\": [\"%s\"], \"name\": \"%s\" } }", config.Name, config.UID, config.DeviceID, config.Name);
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 1); // Humidity sensor config, set the retain flag on the message
+        mqttMessagesQueued++;
+        ESP_LOGI(TAG, "Published humidity config message successfully, msg_id=%d", msg_id);
+
+        sprintf(topic,"homeassistant/sensor/%sVoltage/config", config.Name);
+        sprintf(payload, "{\"device_class\": \"voltage\", \"state_topic\": \"homeassistant/sensor/%s/state\", \
+            \"unit_of_measurement\": \"V\", \"value_template\": \"{{ value_json.voltage}}\",\"unique_id\": \"B_%s\", \
+            \"device\": {\"identifiers\": [\"%s\"], \"name\": \"%s\" } }", config.Name, config.UID, config.DeviceID, config.Name);
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 1); // Humidity sensor config, set the retain flag on the message
+        mqttMessagesQueued++;
+        ESP_LOGI(TAG, "Published temperature config message successfully, msg_id=%d", msg_id);
+
+        // Publish the current values
+        sprintf(topic, "homeassistant/sensor/%s/state", config.Name);
+        sprintf(payload, "{ \"temperature\": %.1f, \"humidity\": %.1f, \"voltage\": %.2f }", temperature, humidity, battVolts);
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 1); // Humidity sensor config, set the retain flag on the message
+        mqttMessagesQueued++;
+        ESP_LOGI(TAG, "Published sensor state message successfully, msg_id=%d", msg_id);
+
+        sentMeasurements = true;
+
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -139,6 +175,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_PUBLISHED:
         ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        mqttMessagesQueued--;
         break;
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
@@ -165,6 +202,7 @@ static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
         .network = {
+            .reconnect_timeout_ms = 250, // Reconnect MQTT broker after this many ms
         },
         .broker.address.uri = config.mqttBrokerUrl,
         .credentials = { 
@@ -174,6 +212,7 @@ static void mqtt_app_start(void)
             }, 
         },
         .session = {
+            .message_retransmit_timeout = 250,  // ms transmission retry
             .protocol_ver = MQTT_PROTOCOL_V_3_1_1
         },
     };
@@ -247,10 +286,6 @@ void app_main(void)
         vTaskDelay(10 / portTICK_PERIOD_MS); // Wait 10 millseconds
     }
 
-    // Start mqtt
-    mqtt_app_start();
-
-
     // Initialise the SHT20 driver
     err = SHT20_Initialise(SHT20_SCL, SHT20_SDA);
     if (err != ESP_OK) {
@@ -258,8 +293,6 @@ void app_main(void)
     }
 
     // Read the current temperature from the SHT20
-    float temperature = 0.0;
-    float humidity = 0.0;
     err = SHT20_TakeReadings(&temperature, &humidity);
     if (err != ESP_OK) {
         printf ("Error reading from the SHT20: %s.\r\n", esp_err_to_name(err));
@@ -280,7 +313,22 @@ void app_main(void)
     adc1_config_width(ADC_WIDTH_BIT_DEFAULT);   // 12 bits
     //int adc_value = adc1_get_raw(ADC1_CHANNEL_6);   // Get the raw ADC value
     uint32_t mV = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_6), &adc1_chars); // convert to volts
-    float battVolts =  ((float)mV / 1000.0) * 2.0; // We have a /2 resistive divider from the battery
+    battVolts = ((float)mV / 1000.0) * 2.0; // We have a /2 resistive divider from the battery
+    battVolts = battVolts * config.battVCalFactor;  // Calibration correction
+    printf("Current battery voltage = %.2fV\r\n", battVolts);
+
+    // Start mqtt
+    mqtt_app_start();
+
+    printf("Waiting for MQTT transmission to complete.\r\n");
+    int64_t st = esp_timer_get_time();
+    while (!sentMeasurements || mqttMessagesQueued > 0) {
+        vTaskDelay(100 / portTICK_PERIOD_MS); 
+        if (esp_timer_get_time() - st > S_TO_uS(5)) { 
+            printf("Timed out waiting for mqtt transmission to complete.\r\n");
+            timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
+        }
+    }
 
     // Check if we are in calibration mode
     if (doBatteryCal) {
@@ -302,11 +350,10 @@ void app_main(void)
                 printf("\r\nError saving configuration.\r\n");
             }
         }
+        // Final battery voltage measurement
+        battVolts = battVolts * config.battVCalFactor;
+        if (DEBUG) { printf("Current battery voltage = %.2fV\r\n", battVolts); }
     }
-
-    // Final battery voltage measurement
-    battVolts = battVolts * config.battVCalFactor;
-    if (DEBUG) { printf("Current battery voltage = %.2fV\r\n", battVolts); }
 
     // All done, unmount partition and disable SPIFFS
     err = esp_vfs_spiffs_unregister(spiffs_conf.partition_label);
@@ -315,12 +362,9 @@ void app_main(void)
     }
     printf("SPIFFS unmounted.\r\n");
 
-    printf("Sleep for 10 seconds to process WiFi connections.\r\n");
-    vTaskDelay(10000 / portTICK_PERIOD_MS); 
-
     // Go to sleep
-    if (DEBUG) { printf("Time to sleep for %d seconds.\r\n", SLEEPTIME); }
-    if (esp_sleep_enable_timer_wakeup(S_TO_uS(SLEEPTIME)) != ESP_OK)
+    if (DEBUG) { printf("Time to sleep for %lld seconds.\r\n", timeToDeepSleep / 1000000); }
+    if (esp_sleep_enable_timer_wakeup(timeToDeepSleep) != ESP_OK)
     {
         while (true)
         {
