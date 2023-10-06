@@ -37,6 +37,7 @@ typedef struct {
   char mqttUsername[40];
   char mqttPassword[160];
   float battVCalFactor;
+  int retries;
 } Configuration;
 
 extern Configuration config;

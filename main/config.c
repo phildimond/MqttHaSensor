@@ -137,6 +137,11 @@ bool LoadConfiguration()
         strcpy(config.mqttPassword, item->valuestring);
     } else { strcat(errorString, "mqttPassword "); } // record which value failed
 
+    item = cJSON_GetObjectItemCaseSensitive(settingsJSON, "retries");
+    if (cJSON_IsString(item) && (item->valuestring != NULL)) {
+        strcpy(config.retries, item->valueint);
+    } else { strcat(errorString, "retries "); } // record which value failed
+
     // Report any decoding errors
     if (strlen(errorString) != 1) {
         printf("Error decoding these configuration elements: %s\r\n", errorString);
@@ -317,6 +322,7 @@ void UserConfigEntry()
             printf("%s", temp.mqttPassword);
         }
     }
+
     printf("\r\n");
     printf("Set configuration to Name=%s, Device ID=%s, UID=%s\r\n", temp.Name, temp.DeviceID, temp.UID);
     printf("                     WiFi SSID=%s, WiFi Password=%s\r\n", temp.ssid, temp.pass);
@@ -327,7 +333,6 @@ void UserConfigEntry()
     {
         if (s[0] == 'Y' || s[0] == 'y')
         {
-            printf("\r\nSaved the new configuration.\r\n");
             strcpy(config.Name, temp.Name);
             strcpy(config.DeviceID, temp.DeviceID);
             strcpy(config.UID, temp.UID);
@@ -336,6 +341,9 @@ void UserConfigEntry()
             strcpy(config.mqttBrokerUrl, temp.mqttBrokerUrl);
             strcpy(config.mqttUsername, temp.mqttUsername);
             strcpy(config.mqttPassword, temp.mqttPassword);
+            config.retries = 0;
+            if (SaveConfiguration()) { printf("\r\nSaved the new configuration.\r\n"); }
+            else { printf("\r\nERROR trying to save the new configuration.\r\n"); }
         }
         else
         {

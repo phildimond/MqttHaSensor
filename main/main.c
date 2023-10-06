@@ -286,7 +286,6 @@ void app_main(void)
             }
         }
         UserConfigEntry();
-        SaveConfiguration();
     }
     else if (DEBUG)
     {
@@ -346,7 +345,6 @@ void app_main(void)
         if (esp_timer_get_time() - st > S_TO_uS(5)) { 
             printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
                 sentMeasurements, gotTime, mqttMessagesQueued);
-            timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
         }
     }
 
@@ -375,25 +373,32 @@ void app_main(void)
         if (DEBUG) { printf("Current battery voltage = %.2fV\r\n", battVolts); }
     }
 
-    // All done, unmount partition and disable SPIFFS
-    err = esp_vfs_spiffs_unregister(spiffs_conf.partition_label);
-    if ( err != ESP_OK) {
-        printf("SPIFFS deregistration: Error %d = %s.\r\n", err, esp_err_to_name(err));
-    }
-    printf("SPIFFS unmounted.\r\n");
-
     // Prepare sleep time calculation if we didn't timeout on transmission
-    if (!timedOut) {
+    if (!timedOut || config.retries >= 5) {
         uint64_t timePastQuarterHour = S_TO_uS((uint64_t)(minute * 60 + seconds));   // in microseconds
         uint64_t quarterHour = S_TO_uS((uint64_t)(15 * 60));            // 15 minutes in microseconds
         while (timePastQuarterHour > quarterHour) { timePastQuarterHour -= quarterHour; } // get this to the num. secs since last quarter hour
         timeToDeepSleep = (quarterHour - timePastQuarterHour); // want to sleep to the next 15 minute time
         if (DEBUG) {
-            printf("Got everything and sent everything. Preparing to sleep.\r\n");
+            if (config.retries < 5) { printf("Got everything and sent everything. Preparing to sleep.\r\n"); }
+            else {printf("We've tries to send stuff after restarting 5 times, giving up. Preparing to sleep.\r\n");}
             printf("Time value was %d minutes and %d seconds past the hour.\r\n", minute, seconds);
             printf("Will deep sleep for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep));
+            config.retries = 0;
         }
+    } else {        
+        timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
+        config.retries++;
+        if (DEBUG) { printf("We timed out trying to send messages so we'll only sleep for 5 seconds. This will be attempt #%d.\r\n", config.retries + 1); }
     }
+
+    // All done, save config then unmount partition and disable SPIFFS
+    SaveConfiguration();
+    err = esp_vfs_spiffs_unregister(spiffs_conf.partition_label);
+    if ( err != ESP_OK) {
+        printf("SPIFFS deregistration: Error %d = %s.\r\n", err, esp_err_to_name(err));
+    }
+    printf("SPIFFS unmounted.\r\n");
 
     // Go to sleep
     if (DEBUG) { printf("Sleeping for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep)); }
