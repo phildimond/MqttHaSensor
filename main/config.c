@@ -138,8 +138,8 @@ bool LoadConfiguration()
     } else { strcat(errorString, "mqttPassword "); } // record which value failed
 
     item = cJSON_GetObjectItemCaseSensitive(settingsJSON, "retries");
-    if (cJSON_IsString(item) && (item->valuestring != NULL)) {
-        strcpy(config.retries, item->valueint);
+    if (cJSON_IsNumber(item)) {
+        config.retries = item->valueint;
     } else { strcat(errorString, "retries "); } // record which value failed
 
     // Report any decoding errors
@@ -151,7 +151,7 @@ bool LoadConfiguration()
     // Remove the cJSON documents to recover memory
     cJSON_Delete(settingsJSON);
 
-    return true; 
+    return true;
 }
 
 // Saves the configuration to a file
@@ -171,10 +171,11 @@ bool SaveConfiguration()
     cJSON_AddItemToObject(root, "mqttBrokerUrl", cJSON_CreateString(config.mqttBrokerUrl));
     cJSON_AddItemToObject(root, "mqttUsername", cJSON_CreateString(config.mqttUsername));
     cJSON_AddItemToObject(root, "mqttPassword", cJSON_CreateString(config.mqttPassword));
+    cJSON_AddItemToObject(root, "retries", cJSON_CreateNumber(config.retries));
 
     // Write the values to the file
     char* rendered = cJSON_Print(root);
-    printf("Rendered JSON: %s\r\n", rendered);
+    //printf("Rendered JSON: %s\r\n", rendered);
 
     // Remove the cJSON documents to recover memory
     cJSON_Delete(root);
@@ -197,18 +198,6 @@ bool SaveConfiguration()
         return false;
     }
     int c;
-    printf("File readback:\r\n");
-    while (1)
-    {
-        c = fgetc(f);
-        if (feof(f))
-        {
-            break;
-        }
-        printf("%c", c);
-    }
-    printf ("\r\n");
-    fclose(f);
 
     return true;
 }

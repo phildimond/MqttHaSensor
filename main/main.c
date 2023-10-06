@@ -170,7 +170,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // Publish the current values
         sprintf(topic, "homeassistant/sensor/%s/state", config.Name);
         sprintf(payload, "{ \"temperature\": %.1f, \"humidity\": %.1f, \"voltage\": %.2f }", temperature, humidity, battVolts);
-        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 1); // Humidity sensor config, set the retain flag on the message
+        msg_id = esp_mqtt_client_publish(client, topic, payload, 0, 1, 0); // Humidity sensor config, donm't retain
         mqttMessagesQueued++;
         ESP_LOGI(TAG, "Published sensor state message successfully, msg_id=%d", msg_id);
 
@@ -379,6 +379,10 @@ void app_main(void)
         uint64_t quarterHour = S_TO_uS((uint64_t)(15 * 60));            // 15 minutes in microseconds
         while (timePastQuarterHour > quarterHour) { timePastQuarterHour -= quarterHour; } // get this to the num. secs since last quarter hour
         timeToDeepSleep = (quarterHour - timePastQuarterHour); // want to sleep to the next 15 minute time
+        // add a little hysteresis if close to 15 mins as the timer will sometimes undershoot if we just add 15 minutes, so we
+        // wake up just before then sleep for a couple of seconds and wake & send again. Battery waste!
+        if (timeToDeepSleep < S_TO_uS(60)) { timeToDeepSleep += S_TO_uS(960); } 
+
         if (DEBUG) {
             if (config.retries < 5) { printf("Got everything and sent everything. Preparing to sleep.\r\n"); }
             else {printf("We've tries to send stuff after restarting 5 times, giving up. Preparing to sleep.\r\n");}
