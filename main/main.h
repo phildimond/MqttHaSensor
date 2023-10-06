@@ -58,12 +58,12 @@
 #include "config.h"
 #include "sht20.h"
 
-#define DEBUG 1
 #define SLEEPTIME 30
 #define BUTTON_PIN  27
 #define SHT20_SCL   22
 #define SHT20_SDA   21
 #define S_TO_uS(s) (s * 1000000)
+#define uS_TO_S(s) (s / 1000000)
 
 static void log_error_if_nonzero(const char *message, int error_code);
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data);

@@ -7,7 +7,10 @@
    2 x 1M resistors. Config allows you to calibrate the battery voltage by
    measuring it and entering the real value. Uses a DF Robot Firebeetle 
    ESP32-E board which has the button and battery divider on board, but
-   will operate with any ESP32 if properly compiled.
+   will operate with any ESP32 if properly compiled. It also expects a time
+   feed from MQTT on homeassistant/CurrentTime, and uses that to synchronise
+   the sensor updates to every 15 minutes (approximately, it will vary a
+   little and retransmit attempts will make it late).
 
    Copyright 2023 Phillip C Dimond
 
@@ -27,6 +30,8 @@
 
 #include "main.h"
 
+#define DEBUG 1 // Set to 1 to dump debugging info to the serial port
+
 esp_err_t err;
 int retry_num = 0;
 char s[80]; // general purpose string input
@@ -37,13 +42,16 @@ bool WiFiGotIP = false;
 bool sentMeasurements = false;
 int mqttMessagesQueued = 0;
 uint64_t timeToDeepSleep = (S_TO_uS(SLEEPTIME));
+bool gotTime = false;
+int year = 0, month = 0, day = 0, hour = 0, minute = 0, seconds = 0;
+
 
 static const char *TAG = "MqttHaSensor";
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
-        ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
+        if (DEBUG) { printf("Last error %s: 0x%x\r\n", message, error_code); }
     }
 }
 
@@ -51,26 +59,26 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
 {
     if (event_id == WIFI_EVENT_STA_START)
     {
-        printf("WIFI CONNECTING....\n");
+        if (DEBUG) { printf("WIFI CONNECTING....\r\n"); }
     }
     else if (event_id == WIFI_EVENT_STA_CONNECTED)
     {
-        printf("WiFi CONNECTED\n");
+        if (DEBUG) { printf("WiFi CONNECTED\r\n"); }
     }
     else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
-        printf("WiFi lost connection\n");
+        if (DEBUG) { printf("WiFi lost connection\r\n"); }
         if (retry_num < 5)
         {
             esp_wifi_connect();
             retry_num++;
-            printf("Retrying to Connect...\n");
+            if (DEBUG) { printf("Retrying to Connect...\r\n"); }
         }
     }
     else if (event_id == IP_EVENT_STA_GOT_IP)
     {
         WiFiGotIP = true;
-        printf("Wifi got IP...\n\n");
+        if (DEBUG) { printf("Wifi got IP...\n\n"); }
     }
 }
 
@@ -130,6 +138,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
 
+        // Subscribe to the time feed
+        msg_id = esp_mqtt_client_subscribe(client, "homeassistant/CurrentTime", 0);
+        ESP_LOGI(TAG, "Subscribe send for time feed, msg_id=%d", msg_id);
+
+        // Send the sensor configurations
         sprintf(topic, "homeassistant/sensor/%sTemperature/config",config.Name);
         sprintf(payload, "{\"device_class\": \"temperature\", \"state_topic\": \"homeassistant/sensor/%s/state\", \
             \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\",\"unique_id\": \"T_%s\", \
@@ -179,8 +192,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        strncpy(s, event->topic, event->topic_len);
+        if (strcmp(s, "homeassistant/CurrentTime") == 0) {
+            // Process the time
+            printf("Got the time from %s, as %.*s.\r\n", s, event->data_len, event->data);
+            gotTime = true;
+            strncpy(s, event->data, event->data_len);
+            sscanf(s, "%d.%d.%d %d:%d:%d", &year, &month, &day, &hour, &minute, &seconds);        }
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -189,7 +207,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
             log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
             ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
-
         }
         break;
     default:
@@ -283,7 +300,7 @@ void app_main(void)
     wifi_connection();
     int loops = 0;
     while (loops < 10000 && !WiFiGotIP) {
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Wait 10 millseconds
+        vTaskDelay(2000 / portTICK_PERIOD_MS); // Wait 10 millseconds
     }
 
     // Initialise the SHT20 driver
@@ -320,12 +337,15 @@ void app_main(void)
     // Start mqtt
     mqtt_app_start();
 
+    // Wait for all message transmission and reception to finish, or timeout
+    bool timedOut = false;
     printf("Waiting for MQTT transmission to complete.\r\n");
     int64_t st = esp_timer_get_time();
-    while (!sentMeasurements || mqttMessagesQueued > 0) {
+    while (!sentMeasurements  || !gotTime || mqttMessagesQueued > 0) {
         vTaskDelay(100 / portTICK_PERIOD_MS); 
         if (esp_timer_get_time() - st > S_TO_uS(5)) { 
-            printf("Timed out waiting for mqtt transmission to complete.\r\n");
+            printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
+                sentMeasurements, gotTime, mqttMessagesQueued);
             timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
         }
     }
@@ -362,8 +382,21 @@ void app_main(void)
     }
     printf("SPIFFS unmounted.\r\n");
 
+    // Prepare sleep time calculation if we didn't timeout on transmission
+    if (!timedOut) {
+        uint64_t timePastQuarterHour = S_TO_uS((uint64_t)(minute * 60 + seconds));   // in microseconds
+        uint64_t quarterHour = S_TO_uS((uint64_t)(15 * 60));            // 15 minutes in microseconds
+        while (timePastQuarterHour > quarterHour) { timePastQuarterHour -= quarterHour; } // get this to the num. secs since last quarter hour
+        timeToDeepSleep = (quarterHour - timePastQuarterHour); // want to sleep to the next 15 minute time
+        if (DEBUG) {
+            printf("Got everything and sent everything. Preparing to sleep.\r\n");
+            printf("Time value was %d minutes and %d seconds past the hour.\r\n", minute, seconds);
+            printf("Will deep sleep for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep));
+        }
+    }
+
     // Go to sleep
-    if (DEBUG) { printf("Time to sleep for %lld seconds.\r\n", timeToDeepSleep / 1000000); }
+    if (DEBUG) { printf("Sleeping for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep)); }
     if (esp_sleep_enable_timer_wakeup(timeToDeepSleep) != ESP_OK)
     {
         while (true)
