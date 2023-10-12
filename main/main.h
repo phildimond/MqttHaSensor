@@ -40,8 +40,10 @@
 #include "esp_sleep.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_check.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 

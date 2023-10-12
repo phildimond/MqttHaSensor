@@ -191,11 +191,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         mqttMessagesQueued--;
         break;
     case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+        //ESP_LOGI(TAG, "MQTT_EVENT_DATA");
         strncpy(s, event->topic, event->topic_len);
         if (strcmp(s, "homeassistant/CurrentTime") == 0) {
             // Process the time
-            printf("Got the time from %s, as %.*s.\r\n", s, event->data_len, event->data);
+            //printf("Got the time from %s, as %.*s.\r\n", s, event->data_len, event->data);
             gotTime = true;
             strncpy(s, event->data, event->data_len);
             sscanf(s, "%d.%d.%d %d:%d:%d", &year, &month, &day, &hour, &minute, &seconds);        }
@@ -241,7 +241,7 @@ static void mqtt_app_start(void)
 
 void app_main(void)
 {
-    bool doBatteryCal = false;
+    bool calConfigMode = false;
 
     // GPIO setup
     gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
@@ -249,7 +249,7 @@ void app_main(void)
 
     if (gpio_get_level(BUTTON_PIN) == 0) {
         printf("Button was pushed.\r\n");
-        doBatteryCal = true;
+        calConfigMode = true;
     }
 
     // Initialise the SPIFFS system
@@ -269,7 +269,7 @@ void app_main(void)
 
     // Load the configuration from the file system
     bool configLoad = LoadConfiguration();
-    if (configLoad == false || config.configOK == false) // || digitalRead(USER_BUTTON) == LOW)
+    if (configLoad == false || config.configOK == false) 
     {
         if (configLoad == false)
         {
@@ -295,6 +295,53 @@ void app_main(void)
         printf("               MQTT URL: %s, Username: %s, Password: %s\r\n", config.mqttBrokerUrl, config.mqttUsername, config.mqttPassword);
     }
     
+    // If we're in cal/config mode, ask if the user wants to change the config
+    if (calConfigMode) {
+        printf("\r\nDo you want to change the configuration (y/n)? ");
+        char c = 'n';
+        if (getLineInput(s, 1) > 0) { c = s[0]; }
+        printf("\r\n");
+        if (c == 'y' || c == 'Y') { UserConfigEntry(); }
+    }
+
+    // Read the battery voltage
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11); // Pin 34 -set attenuation to let us read to about 2.5V at the pin
+    esp_adc_cal_characteristics_t adc1_chars;
+    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 1100, &adc1_chars);
+    adc1_config_width(ADC_WIDTH_BIT_DEFAULT);   // 12 bits
+    //int adc_value = adc1_get_raw(ADC1_CHANNEL_6);   // Get the raw ADC value
+    uint32_t mV = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_6), &adc1_chars); // convert to volts
+    float rawBattVolts = ((float)mV / 1000.0) * 2.0; // We have a /2 resistive divider from the battery
+    battVolts = rawBattVolts * config.battVCalFactor;  // Calibration correction
+    printf("Current battery voltage = %.2fV converted via cal factor %f from raw reading %d = %ldmV \r\n", battVolts, config.battVCalFactor, adc1_get_raw(ADC1_CHANNEL_6), mV);
+
+    // Check if we are in calibration mode
+    if (calConfigMode) {
+        float calVal = 0.0;
+        char vs[10];
+        printf("Please enter the actual measured voltage, no units : ");
+        if(getLineInput(vs, sizeof(vs)) > 0) {
+            printf("\r\n");
+            float val = atof(vs);
+            calVal = val / rawBattVolts;
+            printf("Calculated new calibration factor %f from raw reading %.2f and entered value %f\r\n", calVal, rawBattVolts, val);
+        }        
+        printf("\r\nThe corrected battery voltage is %fV. Should I save it? (y/n)? ", (float)(rawBattVolts * calVal));
+        char c = 'n';
+        if (getLineInput(s, 1) > 0) { c = s[0]; }
+        if (c == 'y' || c == 'Y') {
+            config.battVCalFactor = calVal;
+            if (SaveConfiguration() == true) {
+                printf("Configuration saved successfully.\r\n");
+            } else {
+                printf("Error saving configuration.\r\n");
+            }
+        }
+        // Final battery voltage measurement
+        battVolts = battVolts * config.battVCalFactor;
+        if (DEBUG) { printf("Current battery voltage = %.2fV\r\n", battVolts); }
+    }
+
     // Start WiFi, wait for WiFi to connect and get IP
     wifi_connection();
     int loops = 0;
@@ -322,17 +369,6 @@ void app_main(void)
         printf ("Error removing the SHT20 driver: %s.\r\n", esp_err_to_name(err));
     }
 
-    // Read the battery voltage
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11); // Pin 34 -set attenuation tp let us read to about 2.5V at the pin
-    esp_adc_cal_characteristics_t adc1_chars;
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars);
-    adc1_config_width(ADC_WIDTH_BIT_DEFAULT);   // 12 bits
-    //int adc_value = adc1_get_raw(ADC1_CHANNEL_6);   // Get the raw ADC value
-    uint32_t mV = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_6), &adc1_chars); // convert to volts
-    battVolts = ((float)mV / 1000.0) * 2.0; // We have a /2 resistive divider from the battery
-    battVolts = battVolts * config.battVCalFactor;  // Calibration correction
-    printf("Current battery voltage = %.2fV\r\n", battVolts);
-
     // Start mqtt
     mqtt_app_start();
 
@@ -346,31 +382,6 @@ void app_main(void)
             printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
                 sentMeasurements, gotTime, mqttMessagesQueued);
         }
-    }
-
-    // Check if we are in calibration mode
-    if (doBatteryCal) {
-        float calVal = 0.0;
-        printf("Battery voltage from ADC = %fV\r\n", battVolts);
-        printf("Please enter the actual measured voltage, no units : ");
-        if(getLineInput(s, sizeof(s)) > 0) {
-            float val = atof(s);
-            calVal = val / battVolts;
-        }        
-        printf("\r\nThe corrected battery voltage is %fV. Should I save it? (y/n)? ", (float)(battVolts * calVal));
-        char c = 'n';
-        if (getLineInput(s, 1) > 0) { c = s[0]; }
-        if (c == 'y' || c == 'Y') {
-            config.battVCalFactor = calVal;
-            if (SaveConfiguration() == true) {
-                printf("\r\nConfiguration saved successfully.\r\n");
-            } else {
-                printf("\r\nError saving configuration.\r\n");
-            }
-        }
-        // Final battery voltage measurement
-        battVolts = battVolts * config.battVCalFactor;
-        if (DEBUG) { printf("Current battery voltage = %.2fV\r\n", battVolts); }
     }
 
     // Prepare sleep time calculation if we didn't timeout on transmission
