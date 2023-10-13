@@ -376,11 +376,12 @@ void app_main(void)
     bool timedOut = false;
     printf("Waiting for MQTT transmission to complete.\r\n");
     int64_t st = esp_timer_get_time();
-    while (!sentMeasurements  || !gotTime || mqttMessagesQueued > 0) {
+    while (!timedOut && (!sentMeasurements  || !gotTime || mqttMessagesQueued > 0 )) {
         vTaskDelay(100 / portTICK_PERIOD_MS); 
         if (esp_timer_get_time() - st > S_TO_uS(5)) { 
             printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
                 sentMeasurements, gotTime, mqttMessagesQueued);
+            timedOut = true;
         }
     }
 
