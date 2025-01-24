@@ -55,6 +55,7 @@ int getLineInput(char buf[], size_t len)
             }
             else { 
                 putchar(*bufp);
+                fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
                 bufp++; 
             } //pointer to next character
         }

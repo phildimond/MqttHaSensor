@@ -45,8 +45,7 @@ uint64_t timeToDeepSleep = (S_TO_uS(SLEEPTIME));
 bool gotTime = false;
 int year = 0, month = 0, day = 0, hour = 0, minute = 0, seconds = 0;
 
-
-static const char *TAG = "MqttHaSensor";
+static const char *TAG = "MqttHaSensorMain";
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -72,7 +71,7 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
         {
             esp_wifi_connect();
             retry_num++;
-            if (DEBUG) { printf("Retrying to Connect...\r\n"); }
+            if (DEBUG) { printf("Attempting to reconnect...\r\n"); }
         }
     }
     else if (event_id == IP_EVENT_STA_GOT_IP)
@@ -82,22 +81,20 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
     }
 }
 
-void wifi_connection()
-{
+esp_err_t wifi_connection() {
+    WiFiGotIP = false;
     err = nvs_flash_init();
-    if (err != ESP_OK) { printf("Error at nvs_flash_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    if (err != ESP_OK) { if (DEBUG) { printf("Error at nvs_flash_init: %d = %s.\r\n", err, esp_err_to_name(err)); } }
     err = esp_netif_init();                                                                    // network interdace initialization
-    if (err != ESP_OK) { printf("Error at esp_netif_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    if (err != ESP_OK) { if (DEBUG) { printf("Error at esp_netif_init: %d = %s.\r\n", err, esp_err_to_name(err)); } }
     err = esp_event_loop_create_default();                                                     // responsible for handling and dispatching events
-    if (err != ESP_OK) { printf("Error at esp_event_loop_create_default: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    if (err != ESP_OK) { if (DEBUG) { printf("Error at esp_event_loop_create_default: %d = %s.\r\n", err, esp_err_to_name(err)); } }
     esp_netif_create_default_wifi_sta();                                                 // sets up necessary data structs for wifi station interface
     wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();                     // sets up wifi wifi_init_config struct with default values
     err = esp_wifi_init(&wifi_initiation);                                                     // wifi initialised with dafault wifi_initiation
-    if (err != ESP_OK) { printf("Error at esp_wifi_init: %d = %s.\r\n", err, esp_err_to_name(err)); }
-    err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);  // creating event handler register for wifi
-    if (err != ESP_OK) { printf("Error at esp_event_handler_register(WIFI_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); }
+    if (err != ESP_OK) { if (DEBUG) { printf("Error at esp_wifi_init: %d = %s.\r\n", err, esp_err_to_name(err)); } }
     err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL); // creating event handler register for ip event
-    if (err != ESP_OK) { printf("Error at esp_event_handler_register(IP_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); }
+        if (err != ESP_OK) { if (DEBUG) { printf("Error at esp_event_handler_register(IP_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); } }
     wifi_config_t wifi_configuration = {                                                 // struct wifi_config_t var wifi_configuration
         .sta = {
             // we are sending a const char of ssid and password which we will strcpy in following line so leaving it blank
@@ -110,8 +107,9 @@ void wifi_connection()
     esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);  // setting up configs when event ESP_IF_WIFI_STA
     esp_wifi_start();       // start connection with configurations provided in funtion
     esp_wifi_set_mode(WIFI_MODE_STA);   // station mode selected
-    esp_wifi_connect(); // connect with saved ssid and pass
-    printf( "wifi_init_softap finished. SSID:%s  password:%s", config.ssid, config.pass);
+    err = esp_wifi_connect(); // connect with saved ssid and pass
+    if (err != ESP_OK) { printf("esp_wifi_connect failed with error %s", esp_err_to_name(err)); }
+    return err;
 } 
 
 /*
@@ -273,18 +271,13 @@ void app_main(void)
     {
         if (configLoad == false)
         {
-            if (DEBUG)
-            {
-                printf("Loading the configuration failed. Please enter the configuration details.\r\n");
-            }
+            if (DEBUG) { printf("Loading the configuration failed. Please enter the configuration details.\r\n"); }
         }
         else if (config.configOK == false)
         {
-            if (DEBUG)
-            {
-                printf("The stored configuration is marked as invalid. Please enter the configuration details.\r\n");
-            }
+            if (DEBUG) { printf("The stored configuration is marked as invalid. Please enter the configuration details.\r\n"); }
         }
+        SetDefaultConfig();
         UserConfigEntry();
     }
     else if (DEBUG)
@@ -297,7 +290,8 @@ void app_main(void)
     
     // If we're in cal/config mode, ask if the user wants to change the config
     if (calConfigMode) {
-        printf("\r\nDo you want to change the configuration (y/n)? ");
+        printf("\r\nDo you want to change the configuration (y/n)? "); 
+        fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
         char c = 'n';
         if (getLineInput(s, 1) > 0) { c = s[0]; }
         printf("\r\n");
@@ -320,6 +314,7 @@ void app_main(void)
         float calVal = 0.0;
         char vs[10];
         printf("Please enter the actual measured voltage, no units : ");
+        fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
         if(getLineInput(vs, sizeof(vs)) > 0) {
             printf("\r\n");
             float val = atof(vs);
@@ -327,6 +322,7 @@ void app_main(void)
             printf("Calculated new calibration factor %f from raw reading %.2f and entered value %f\r\n", calVal, rawBattVolts, val);
         }        
         printf("\r\nThe corrected battery voltage is %fV. Should I save it? (y/n)? ", (float)(rawBattVolts * calVal));
+        fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
         char c = 'n';
         if (getLineInput(s, 1) > 0) { c = s[0]; }
         if (c == 'y' || c == 'Y') {
@@ -343,14 +339,25 @@ void app_main(void)
     }
 
     // Start WiFi, wait for WiFi to connect and get IP
-    wifi_connection();
+    WiFiGotIP = false;
+    esp_err_t connectionResult =  wifi_connection();
+    if (connectionResult != ESP_OK) { if (DEBUG) { printf("FAILED when connecting to WiFi. Result was %s\r\n", esp_err_to_name(connectionResult)); } }
     int loops = 0;
-    while (loops < 10000 && !WiFiGotIP) {
-        vTaskDelay(2000 / portTICK_PERIOD_MS); // Wait 10 millseconds
+    if (DEBUG) { printf ("Waiting for connection to WiFi "); }
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
+    while (loops < 30 && !WiFiGotIP) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS); // Wait 2 seconds
+        if (DEBUG) { printf("."); fflush(stdout); }
         loops++;
     }
+    if (WiFiGotIP) { 
+        esp_err_t err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);  // creating event handler register for wifi
+        if (err != ESP_OK) { if (DEBUG) { printf("Error at esp_event_handler_register(IP_EVENT: %d = %s.\r\n", err, esp_err_to_name(err)); } }
+        if (DEBUG) { printf("WiFi got connection.\r\n"); } 
+    }
+    else { if (DEBUG) { printf("Failed to conenct to WiFi after %d attempts.\r\n", loops); } }
 
-    // If we got a WiFi IP address, then continue priocessing
+    // If we got a WiFi IP address, then continue processing
     if (WiFiGotIP) {
 
         // Initialise the SHT20 driver
@@ -414,7 +421,7 @@ void app_main(void)
     } else {
         // We didn't get a WiFi IP or connection, so we will sleep for a little and try again.
         timeToDeepSleep = (S_TO_uS(5));
-        if (DEBUG) { printf("We timed out trying to get a WiFi IP address so we'll only sleep for 5 seconds. This will be attempt #%d.\r\n", config.retries + 1); }
+        if (DEBUG) { printf("We timed out trying to get a WiFi IP address so we'll only sleep for 30 seconds.\r\n"); }
     }
 
     // All done, save config then unmount partition and disable SPIFFS

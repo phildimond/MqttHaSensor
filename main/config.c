@@ -216,6 +216,7 @@ void UserConfigEntry()
     strcpy(temp.mqttUsername, config.mqttUsername);
     strcpy(temp.mqttPassword, config.mqttPassword);
     printf("\r\nConfiguration: Enter the device name in HA (%s) : ", temp.Name);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.Name))
@@ -228,6 +229,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the Device ID for HA (%s) : ", temp.DeviceID);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.DeviceID))
@@ -240,6 +242,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the device UID (%s) : ", temp.UID);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.UID))
@@ -252,6 +255,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the SSID to connect to (%s) : ", temp.ssid);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.ssid))
@@ -264,6 +268,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the SSID's password (%s) : ", temp.pass);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.pass))
@@ -276,6 +281,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the MQTT broker's URL (%s) : ", temp.mqttBrokerUrl);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.mqttBrokerUrl))
@@ -288,6 +294,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the username for the MQTT broker (%s) : ", temp.mqttUsername);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.mqttUsername))
@@ -300,6 +307,7 @@ void UserConfigEntry()
         }
     }
     printf("\r\nConfiguration: Enter the password for the MQTT broker (%s) : ", temp.mqttPassword);
+    fflush(stdout); // Had to add in V5.2 compiler or printf waits for a newline before transmitting
     if (getLineInput(s, sizeof(s)))
     {
         if (strlen(s) > 0 && strlen(s) < sizeof(temp.mqttPassword))
@@ -318,6 +326,7 @@ void UserConfigEntry()
     printf("                     MQTT URL=%s, Username=%s, Password=%s\r\n", temp.mqttBrokerUrl, temp.mqttUsername, temp.mqttPassword);
 
     printf("Do you wish to set these values (y/N)? ");
+    fflush(stdout); // Had to add in V5.2 compiloer or printf waits for a newline before transmitting
     if (getLineInput(s, 80))
     {
         if (s[0] == 'Y' || s[0] == 'y')
