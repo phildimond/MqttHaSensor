@@ -347,65 +347,74 @@ void app_main(void)
     int loops = 0;
     while (loops < 10000 && !WiFiGotIP) {
         vTaskDelay(2000 / portTICK_PERIOD_MS); // Wait 10 millseconds
+        loops++;
     }
 
-    // Initialise the SHT20 driver
-    err = SHT20_Initialise(SHT20_SCL, SHT20_SDA);
-    if (err != ESP_OK) {
-        printf ("Error initialising the SHT20 driver: %s.\r\n", esp_err_to_name(err));
-    }
+    // If we got a WiFi IP address, then continue priocessing
+    if (WiFiGotIP) {
 
-    // Read the current temperature from the SHT20
-    err = SHT20_TakeReadings(&temperature, &humidity);
-    if (err != ESP_OK) {
-        printf ("Error reading from the SHT20: %s.\r\n", esp_err_to_name(err));
+        // Initialise the SHT20 driver
+        err = SHT20_Initialise(SHT20_SCL, SHT20_SDA);
+        if (err != ESP_OK) {
+            printf ("Error initialising the SHT20 driver: %s.\r\n", esp_err_to_name(err));
+        }
+
+        // Read the current temperature from the SHT20
+        err = SHT20_TakeReadings(&temperature, &humidity);
+        if (err != ESP_OK) {
+            printf ("Error reading from the SHT20: %s.\r\n", esp_err_to_name(err));
+        } else {
+            printf ("The current temperature is %f C and the current humidity is %f %%RH.\r\n", temperature, humidity);
+        }
+
+        // Remove the SHT20 driver
+        err = SHT20_Remove();
+        if (err != ESP_OK) {
+            printf ("Error removing the SHT20 driver: %s.\r\n", esp_err_to_name(err));
+        }
+
+        // Start mqtt
+        mqtt_app_start();
+
+        // Wait for all message transmission and reception to finish, or timeout
+        bool timedOut = false;
+        printf("Waiting for MQTT transmission to complete.\r\n");
+        int64_t st = esp_timer_get_time();
+        while (!timedOut && (!sentMeasurements  || !gotTime || mqttMessagesQueued > 0 )) {
+            vTaskDelay(100 / portTICK_PERIOD_MS); 
+            if (esp_timer_get_time() - st > S_TO_uS(5)) { 
+                printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
+                    sentMeasurements, gotTime, mqttMessagesQueued);
+                timedOut = true;
+            }
+        }
+
+        // Prepare sleep time calculation if we didn't timeout on transmission
+        if (!timedOut || config.retries >= 5) {
+            uint64_t timePastQuarterHour = S_TO_uS((uint64_t)(minute * 60 + seconds));   // in microseconds
+            uint64_t quarterHour = S_TO_uS((uint64_t)(15 * 60));            // 15 minutes in microseconds
+            while (timePastQuarterHour > quarterHour) { timePastQuarterHour -= quarterHour; } // get this to the num. secs since last quarter hour
+            timeToDeepSleep = (quarterHour - timePastQuarterHour); // want to sleep to the next 15 minute time
+            // add a little hysteresis if close to 15 mins as the timer will sometimes undershoot if we just add 15 minutes, so we
+            // wake up just before then sleep for a couple of seconds and wake & send again. Battery waste!
+            if (timeToDeepSleep < S_TO_uS(60)) { timeToDeepSleep += S_TO_uS(960); } 
+
+            if (DEBUG) {
+                if (config.retries < 5) { printf("Got everything and sent everything. Preparing to sleep.\r\n"); }
+                else {printf("We've tries to send stuff after restarting 5 times, giving up. Preparing to sleep.\r\n");}
+                printf("Time value was %d minutes and %d seconds past the hour.\r\n", minute, seconds);
+                printf("Will deep sleep for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep));
+                config.retries = 0;
+            }
+        } else {        
+            timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
+            config.retries++;
+            if (DEBUG) { printf("We timed out trying to send messages so we'll only sleep for 5 seconds. This will be attempt #%d.\r\n", config.retries + 1); }
+        }
     } else {
-        printf ("The current temperature is %f C and the current humidity is %f %%RH.\r\n", temperature, humidity);
-    }
-
-    // Remove the SHT20 driver
-    err = SHT20_Remove();
-    if (err != ESP_OK) {
-        printf ("Error removing the SHT20 driver: %s.\r\n", esp_err_to_name(err));
-    }
-
-    // Start mqtt
-    mqtt_app_start();
-
-    // Wait for all message transmission and reception to finish, or timeout
-    bool timedOut = false;
-    printf("Waiting for MQTT transmission to complete.\r\n");
-    int64_t st = esp_timer_get_time();
-    while (!timedOut && (!sentMeasurements  || !gotTime || mqttMessagesQueued > 0 )) {
-        vTaskDelay(100 / portTICK_PERIOD_MS); 
-        if (esp_timer_get_time() - st > S_TO_uS(5)) { 
-            printf("Timed out waiting for mqtt transmission to complete. sentMeasurements=%d, gotTime=%d, mqttMessagesQueued=%d\r\n",
-                sentMeasurements, gotTime, mqttMessagesQueued);
-            timedOut = true;
-        }
-    }
-
-    // Prepare sleep time calculation if we didn't timeout on transmission
-    if (!timedOut || config.retries >= 5) {
-        uint64_t timePastQuarterHour = S_TO_uS((uint64_t)(minute * 60 + seconds));   // in microseconds
-        uint64_t quarterHour = S_TO_uS((uint64_t)(15 * 60));            // 15 minutes in microseconds
-        while (timePastQuarterHour > quarterHour) { timePastQuarterHour -= quarterHour; } // get this to the num. secs since last quarter hour
-        timeToDeepSleep = (quarterHour - timePastQuarterHour); // want to sleep to the next 15 minute time
-        // add a little hysteresis if close to 15 mins as the timer will sometimes undershoot if we just add 15 minutes, so we
-        // wake up just before then sleep for a couple of seconds and wake & send again. Battery waste!
-        if (timeToDeepSleep < S_TO_uS(60)) { timeToDeepSleep += S_TO_uS(960); } 
-
-        if (DEBUG) {
-            if (config.retries < 5) { printf("Got everything and sent everything. Preparing to sleep.\r\n"); }
-            else {printf("We've tries to send stuff after restarting 5 times, giving up. Preparing to sleep.\r\n");}
-            printf("Time value was %d minutes and %d seconds past the hour.\r\n", minute, seconds);
-            printf("Will deep sleep for %lld seconds.\r\n", uS_TO_S(timeToDeepSleep));
-            config.retries = 0;
-        }
-    } else {        
-        timeToDeepSleep = (S_TO_uS(5)); // deep sleep for 5 seconds and try again
-        config.retries++;
-        if (DEBUG) { printf("We timed out trying to send messages so we'll only sleep for 5 seconds. This will be attempt #%d.\r\n", config.retries + 1); }
+        // We didn't get a WiFi IP or connection, so we will sleep for a little and try again.
+        timeToDeepSleep = (S_TO_uS(5));
+        if (DEBUG) { printf("We timed out trying to get a WiFi IP address so we'll only sleep for 5 seconds. This will be attempt #%d.\r\n", config.retries + 1); }
     }
 
     // All done, save config then unmount partition and disable SPIFFS
