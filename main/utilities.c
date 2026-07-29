@@ -24,6 +24,11 @@
 #include "freertos/task.h"
 #include "utilities.h"
 
+void clear_input_buffer(FILE *fp) {
+    int c;
+    while ((c = getc(fp)) != '\n' && c != EOF);
+}
+
 /*
     Read in a line of text from the console
 
@@ -34,7 +39,8 @@
 int getLineInput(char buf[], size_t len)
 {
     memset(buf, 0, len);
-    fpurge(stdin); //clears any junk in stdin
+
+    clear_input_buffer(stdin); //clears any junk in stdin
     char *bufp;
     bufp = buf;
     while(1) {

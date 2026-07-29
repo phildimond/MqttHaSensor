@@ -104,7 +104,7 @@ esp_err_t wifi_connection() {
     };
     strcpy((char*)wifi_configuration.sta.ssid, config.ssid);    
     strcpy((char*)wifi_configuration.sta.password, config.pass);   
-    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);  // setting up configs when event ESP_IF_WIFI_STA
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_configuration);  // setting up configs when event ESP_IF_WIFI_STA
     esp_wifi_start();       // start connection with configurations provided in funtion
     esp_wifi_set_mode(WIFI_MODE_STA);   // station mode selected
     err = esp_wifi_connect(); // connect with saved ssid and pass
@@ -299,15 +299,38 @@ void app_main(void)
     }
 
     // Read the battery voltage
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11); // Pin 34 -set attenuation to let us read to about 2.5V at the pin
-    esp_adc_cal_characteristics_t adc1_chars;
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 1100, &adc1_chars);
-    adc1_config_width(ADC_WIDTH_BIT_DEFAULT);   // 12 bits
-    //int adc_value = adc1_get_raw(ADC1_CHANNEL_6);   // Get the raw ADC value
-    uint32_t mV = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_6), &adc1_chars); // convert to volts
+    adc_oneshot_unit_handle_t adc1_handle;
+    adc_oneshot_unit_init_cfg_t adc1_init_config = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc1_init_config, &adc1_handle));
+
+    adc_oneshot_chan_cfg_t adc1_chan_config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN_DB_12, // Pin 34 -set attenuation to let us read to about 2.5V at the pin
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_6, &adc1_chan_config));
+
+    // Original ESP32 only supports the line-fitting calibration scheme (no curve fitting)
+    adc_cali_handle_t adc1_cali_handle = NULL;
+    adc_cali_line_fitting_config_t adc1_cali_config = {
+        .unit_id = ADC_UNIT_1,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .default_vref = 1100,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_line_fitting(&adc1_cali_config, &adc1_cali_handle));
+
+    int adcRaw = 0;
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_6, &adcRaw)); // Get the raw ADC value
+    int mV = 0;
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_handle, adcRaw, &mV)); // convert to volts
     float rawBattVolts = ((float)mV / 1000.0) * 2.0; // We have a /2 resistive divider from the battery
     battVolts = rawBattVolts * config.battVCalFactor;  // Calibration correction
-    printf("Current battery voltage = %.2fV converted via cal factor %f from raw reading %d = %ldmV \r\n", battVolts, config.battVCalFactor, adc1_get_raw(ADC1_CHANNEL_6), mV);
+    printf("Current battery voltage = %.2fV converted via cal factor %f from raw reading %d = %dmV \r\n", battVolts, config.battVCalFactor, adcRaw, mV);
+
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(adc1_cali_handle));
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
 
     // Check if we are in calibration mode
     if (calConfigMode) {

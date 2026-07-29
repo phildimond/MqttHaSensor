@@ -12,5 +12,13 @@
   "idf.openOcdConfigs": [
     "interface/ftdi/esp32_devkitj_v1.cfg",
     "target/esp32.cfg"
+  ],
+  "idf.currentSetup": "/home/phillip/.espressif/v6.0.2/esp-idf",
+  "idf.customExtraVars": {},
+  "clangd.path": "/home/phillip/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/phillip/source/ESP32/MqttHaSensor/build"
   ]
 }

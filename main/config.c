@@ -197,7 +197,6 @@ bool SaveConfiguration()
         printf("Failed to open file to read it back.\r\n");
         return false;
     }
-    int c;
 
     return true;
 }
